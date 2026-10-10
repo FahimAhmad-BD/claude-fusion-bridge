@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "9b3e7c21-5d48-4a6f-8e12-c04f7a6d2b59",
+  "author": "Fahim Ahmad",
+  "description": {
+    "": "Runs Python jobs dropped into Documents/ClaudeFusion/bridge/inbox so Claude Code (or any local tool) can drive Fusion."
+  },
+  "version": "1.0.0",
+  "runOnStartup": true,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
