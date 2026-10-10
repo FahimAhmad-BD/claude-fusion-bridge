@@ -22,8 +22,14 @@ mv "$bridge/inbox/$name.tmp" "$bridge/inbox/$name.py"
 out="$bridge/outbox/$name.json"
 for ((i = 0; i < timeout * 2; i++)); do
   if [ -f "$out" ]; then
-    py="${BRIDGE_PY:-$(command -v python3 || command -v python || true)}"
-    if [ -x "$py" ]; then
+    py="${BRIDGE_PY:-}"
+    if [ -z "$py" ]; then
+      for cand in python3 python; do
+        # Skip the Windows Store placeholder, which exists but does not run Python
+        if command -v "$cand" >/dev/null 2>&1 && "$cand" -c "import json" >/dev/null 2>&1; then py="$cand"; break; fi
+      done
+    fi
+    if [ -n "$py" ]; then
       "$py" -c 'import json,sys; d=json.load(open(sys.argv[1])); print("ok:", d["ok"], " seconds:", d["seconds"]); print(d["stdout"], end=""); print(d["error"] or "", end=""); [print("image:", i) for i in d["images"]]' "$out"
     else
       cat "$out"
