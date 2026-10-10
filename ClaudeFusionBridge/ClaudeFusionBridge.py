@@ -42,6 +42,8 @@ _event = None
 _handlers = []
 _stop = threading.Event()
 _pending = set()
+_pending_lock = threading.Lock()
+_poller = None
 _state = {}
 
 
@@ -58,6 +60,14 @@ def _design():
 
 def _run_job(path):
     job = os.path.splitext(os.path.basename(path))[0]
+    # Claim the job atomically; if another handler already took it, do nothing
+    claimed = path + ".running"
+    try:
+        os.replace(path, claimed)
+    except OSError:
+        with _pending_lock:
+            _pending.discard(path)
+        return
     result = {"job": job, "ok": False, "stdout": "", "error": None, "images": [],
               "started": time.strftime("%Y-%m-%d %H:%M:%S"), "seconds": 0.0}
 
@@ -73,7 +83,7 @@ def _run_job(path):
     buf = io.StringIO()
     t0 = time.time()
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(claimed, encoding="utf-8") as f:
             code = f.read()
         namespace = {"__name__": "__bridge_job__", "adsk": adsk, "app": app, "ui": ui,
                      "design": _design, "snapshot": snapshot, "state": _state}
@@ -86,11 +96,12 @@ def _run_job(path):
         result["stdout"] = buf.getvalue()
         result["seconds"] = round(time.time() - t0, 3)
         try:
-            os.replace(path, os.path.join(DONE, os.path.basename(path)))
+            os.replace(claimed, os.path.join(DONE, os.path.basename(path)))
         except OSError:
             pass
         _write_json(os.path.join(OUTBOX, job + ".json"), result)
-        _pending.discard(path)
+        with _pending_lock:
+            _pending.discard(path)
 
 
 class _JobHandler(adsk.core.CustomEventHandler):
@@ -110,9 +121,11 @@ def _poll():
             except OSError:
                 pass
         for path in sorted(glob.glob(os.path.join(INBOX, "*.py"))):
-            if path not in _pending:
+            with _pending_lock:
+                if path in _pending:
+                    continue
                 _pending.add(path)
-                app.fireCustomEvent(EVENT_ID, path)
+            app.fireCustomEvent(EVENT_ID, path)
 
 
 def run(context):
@@ -127,7 +140,10 @@ def run(context):
         _event.add(handler)
         _handlers.append(handler)
         _stop.clear()
-        threading.Thread(target=_poll, daemon=True).start()
+        global _poller
+        if _poller is None or not _poller.is_alive():      # Fusion may call run() more than once
+            _poller = threading.Thread(target=_poll, daemon=True)
+            _poller.start()
     except Exception:
         if ui:
             ui.messageBox("ClaudeFusionBridge failed to start:\n" + traceback.format_exc())
