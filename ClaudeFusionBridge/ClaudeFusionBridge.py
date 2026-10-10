@@ -44,6 +44,7 @@ _stop = threading.Event()
 _pending = set()
 _pending_lock = threading.Lock()
 _poller = None
+_busy = False          # a job is executing; Fusion can deliver events during long API calls
 _state = {}
 
 
@@ -59,6 +60,21 @@ def _design():
 
 
 def _run_job(path):
+    global _busy
+    if _busy:
+        # Another job is still running (Fusion pumped this event during it): leave the file
+        # in the inbox and let the poller fire it again later.
+        with _pending_lock:
+            _pending.discard(path)
+        return
+    _busy = True
+    try:
+        _run_claimed(path)
+    finally:
+        _busy = False
+
+
+def _run_claimed(path):
     job = os.path.splitext(os.path.basename(path))[0]
     # Claim the job atomically; if another handler already took it, do nothing
     claimed = path + ".running"
